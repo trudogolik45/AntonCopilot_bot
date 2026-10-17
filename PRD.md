@@ -12,7 +12,7 @@
 | Telegram    | aiogram 3, polling, Business Connection           |
 | LLM         | OpenRouter, `anthropic/claude-haiku-5.5` (в конфиге) |
 | База данных | PostgreSQL, SQLAlchemy 2                          |
-| Хостинг     | VPS `cpbox`, Docker Compose (см. ADR-0001)        |
+| Хостинг     | VPS `n3-vps`, Docker Compose (см. ADR-0001)       |
 | Мониторинг  | структурированные логи, без Sentry                |
 
 Не нужно: Kubernetes, Kafka, микросервисы, Redis, LangChain, serverless, Sentry, HTTP API.

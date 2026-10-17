@@ -1,4 +1,4 @@
-HOST ?= cpbox
+HOST ?= n3-vps
 DIR ?= /opt/antoncopilot
 
 .PHONY: check sync build deploy logs

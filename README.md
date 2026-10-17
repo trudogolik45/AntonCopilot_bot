@@ -49,7 +49,7 @@ make check                # ruff + mypy --strict + pytest
 
 Тесты гоняют обработчики aiogram против настоящей PostgreSQL, а Telegram Bot API и OpenRouter подменены фейками.
 
-Выкатка на VPS: `make deploy` (rsync + `docker compose up -d` на хосте `cpbox`).
+Выкатка на VPS: `make deploy` (rsync + `docker compose up -d` на хосте `n3-vps`).
 
 ## Лицензия
 

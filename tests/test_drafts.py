@@ -16,8 +16,10 @@ from aiogram.types import (
     Voice,
 )
 from aiogram.types import Message as TgMessage
+from sqlalchemy import func, select
 
 from antoncopilot.app import build_dispatcher
+from antoncopilot.db import ChatMessage
 from tests.conftest import (
     CONNECTION_ID,
     INTERLOCUTOR,
@@ -31,11 +33,16 @@ from tests.conftest import (
 _update_id = 0
 
 
-def business_message(text: str | None = None, sender: User = INTERLOCUTOR, **extra: Any) -> Update:
+def business_message(
+    text: str | None = None,
+    sender: User = INTERLOCUTOR,
+    message_id: int | None = None,
+    **extra: Any,
+) -> Update:
     global _update_id
     _update_id += 1
     message = TgMessage(
-        message_id=_update_id,
+        message_id=message_id or _update_id,
         date=datetime.now(UTC),
         chat=Chat(id=INTERLOCUTOR.id, type="private", first_name=INTERLOCUTOR.first_name),
         from_user=sender,
@@ -182,3 +189,74 @@ async def test_document_with_caption_brings_no_draft(
     await dp.feed_update(bot, business_message(document=document, caption="Договор во вложении"))
 
     assert session.sent() == []
+
+
+THEM, ME = False, True
+
+
+async def test_draft_is_written_from_whole_chat_history(
+    bot: Bot, writer: FakeWriter, sessionmaker: Any
+) -> None:
+    dp = build_dispatcher(sessionmaker, writer)
+    await dp.feed_update(bot, business_message("Привет!"))
+
+    await dp.feed_update(bot, business_message("Сколько стоит лендинг?"))
+
+    assert writer.histories[-1] == [(THEM, "Привет!"), (THEM, "Сколько стоит лендинг?")]
+
+
+async def test_owners_own_message_becomes_part_of_history(
+    bot: Bot, writer: FakeWriter, sessionmaker: Any
+) -> None:
+    dp = build_dispatcher(sessionmaker, writer)
+    await dp.feed_update(bot, business_message("Лендинг — от 50 тысяч", sender=OWNER))
+
+    await dp.feed_update(bot, business_message("А сроки?"))
+
+    assert writer.histories[-1] == [(ME, "Лендинг — от 50 тысяч"), (THEM, "А сроки?")]
+
+
+async def test_sent_reply_becomes_part_of_history(
+    bot: Bot, session: FakeSession, writer: FakeWriter, sessionmaker: Any
+) -> None:
+    dp = build_dispatcher(sessionmaker, writer)
+    await dp.feed_update(bot, business_message("Сколько стоит лендинг?"))
+    await dp.feed_update(bot, press(send_button_data(session.sent()[0]), OWNER))
+
+    await dp.feed_update(bot, business_message("Ок, высылаю"))
+
+    assert writer.histories[-1] == [
+        (THEM, "Сколько стоит лендинг?"),
+        (ME, "Здравствуйте! Пришлите детали — посчитаю."),
+        (THEM, "Ок, высылаю"),
+    ]
+
+
+async def test_echo_of_sent_reply_is_not_stored_twice(
+    bot: Bot, session: FakeSession, writer: FakeWriter, sessionmaker: Any
+) -> None:
+    dp = build_dispatcher(sessionmaker, writer)
+    await dp.feed_update(bot, business_message("Сколько стоит лендинг?"))
+    await dp.feed_update(bot, press(send_button_data(session.sent()[0]), OWNER))
+    sent_id = 1002  # FakeSession нумерует отправленные сообщения с 1001: Черновик, затем ответ
+    echo = business_message(writer.reply, sender=OWNER, message_id=sent_id)
+
+    await dp.feed_update(bot, echo)
+    await dp.feed_update(bot, business_message("Ок"))
+
+    assert writer.histories[-1].count((ME, writer.reply)) == 1
+
+
+async def test_chat_keeps_only_last_20_messages(
+    bot: Bot, writer: FakeWriter, sessionmaker: Any
+) -> None:
+    dp = build_dispatcher(sessionmaker, writer)
+
+    for n in range(1, 26):
+        await dp.feed_update(bot, business_message(f"Сообщение {n}"))
+
+    history = writer.histories[-1]
+    assert len(history) == 20
+    assert history[0] == (THEM, "Сообщение 6")
+    async with sessionmaker() as db:
+        assert await db.scalar(select(func.count()).select_from(ChatMessage)) == 20

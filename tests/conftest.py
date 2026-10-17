@@ -1,5 +1,5 @@
 import os
-from collections.abc import AsyncGenerator, AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator, Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -10,7 +10,7 @@ from aiogram.methods import GetBusinessConnection, SendMessage, TelegramMethod
 from aiogram.types import BusinessConnection, Chat, Message, User
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 
-from antoncopilot.db import Base
+from antoncopilot.db import Base, ChatMessage
 
 TEST_DATABASE_URL = os.environ.get(
     "TEST_DATABASE_URL",
@@ -67,11 +67,15 @@ class FakeSession(BaseSession):
 class FakeWriter:
     def __init__(self, reply: str = "Здравствуйте! Пришлите детали — посчитаю.") -> None:
         self.reply = reply
-        self.incoming: list[str] = []
+        self.histories: list[list[tuple[bool, str]]] = []
 
-    async def write(self, incoming: str) -> str:
-        self.incoming.append(incoming)
+    async def write(self, history: Sequence[ChatMessage]) -> str:
+        self.histories.append([(m.from_owner, m.text) for m in history])
         return self.reply
+
+    @property
+    def incoming(self) -> list[str]:
+        return [history[-1][1] for history in self.histories]
 
 
 @pytest.fixture(scope="session")

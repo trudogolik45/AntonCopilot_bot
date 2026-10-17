@@ -20,6 +20,14 @@ log = logging.getLogger(__name__)
 
 SEND_PREFIX = "send:"
 HISTORY_LIMIT = 20
+ATTACHMENT_LABELS = {
+    "voice": "[голосовое]",
+    "video_note": "[видеосообщение]",
+    "sticker": "[стикер]",
+    "photo": "[фото]",
+    "video": "[видео]",
+    "document": "[файл]",
+}
 
 
 class DraftWriter(Protocol):
@@ -34,6 +42,24 @@ def send_keyboard(draft: Draft) -> InlineKeyboardMarkup:
 def render_draft(message: Message, incoming: str, draft: Draft) -> str:
     name = message.from_user.full_name if message.from_user else "Без имени"
     return f"{name}: {incoming}\n\nЧерновик:\n{draft.text}"
+
+
+def draft_source(message: Message) -> str | None:
+    """Текст, на который пишется Черновик: сам текст или подпись к фото."""
+    if message.photo:
+        return message.caption
+    return message.text
+
+
+def history_text(message: Message) -> str:
+    """Как сообщение выглядит в Истории чата: текст или метка вложения с подписью."""
+    if text := draft_source(message):
+        return text
+    label = next(
+        (label for kind, label in ATTACHMENT_LABELS.items() if getattr(message, kind)),
+        "[вложение]",
+    )
+    return " ".join(filter(None, [label, message.caption]))
 
 
 def is_from_owner(message: Message, connection: BusinessConnection) -> bool:
@@ -88,16 +114,18 @@ def build_dispatcher(
                 .returning(Draft)
             )
 
-    @router.business_message(F.business_connection_id, F.text | (F.photo & F.caption))
+    @router.business_message(F.business_connection_id)
     async def on_incoming(message: Message, bot: Bot) -> None:
         connection = await bot.get_business_connection(message.business_connection_id or "")
         from_owner = is_from_owner(message, connection)
-        incoming = message.text or message.caption or ""
+        incoming = history_text(message)
         history = await remember(
             connection.user.id, message.chat.id, message.message_id, from_owner, incoming
         )
         if from_owner:
             log.info("owner_outgoing_seen", extra={"chat_id": message.chat.id})
+            return
+        if not draft_source(message):
             return
         draft = await save(
             Draft(

@@ -10,9 +10,13 @@ from aiogram.types import (
     Chat,
     Document,
     InlineKeyboardMarkup,
+    Location,
     PhotoSize,
+    Sticker,
     Update,
     User,
+    Video,
+    VideoNote,
     Voice,
 )
 from aiogram.types import Message as TgMessage
@@ -260,3 +264,105 @@ async def test_chat_keeps_only_last_20_messages(
     assert history[0] == (THEM, "Сообщение 6")
     async with sessionmaker() as db:
         assert await db.scalar(select(func.count()).select_from(ChatMessage)) == 20
+
+
+async def test_voice_message_enters_history_as_label_without_draft(
+    bot: Bot, session: FakeSession, writer: FakeWriter, sessionmaker: Any
+) -> None:
+    dp = build_dispatcher(sessionmaker, writer)
+    await dp.feed_update(
+        bot, business_message(voice=Voice(file_id="v", file_unique_id="v", duration=3))
+    )
+    assert session.sent() == []
+
+    await dp.feed_update(bot, business_message("Послушал?"))
+
+    assert writer.histories[-1] == [(THEM, "[голосовое]"), (THEM, "Послушал?")]
+
+
+async def test_document_enters_history_as_label_with_caption(
+    bot: Bot, writer: FakeWriter, sessionmaker: Any
+) -> None:
+    dp = build_dispatcher(sessionmaker, writer)
+    document = Document(file_id="d", file_unique_id="d")
+    await dp.feed_update(bot, business_message(document=document, caption="Договор"))
+    await dp.feed_update(bot, business_message(document=document))
+
+    await dp.feed_update(bot, business_message("Посмотрите?"))
+
+    assert writer.histories[-1] == [
+        (THEM, "[файл] Договор"),
+        (THEM, "[файл]"),
+        (THEM, "Посмотрите?"),
+    ]
+
+
+async def test_photo_without_caption_enters_history_as_label_without_draft(
+    bot: Bot, session: FakeSession, writer: FakeWriter, sessionmaker: Any
+) -> None:
+    dp = build_dispatcher(sessionmaker, writer)
+    photo = [PhotoSize(file_id="p", file_unique_id="p", width=10, height=10)]
+    await dp.feed_update(bot, business_message(photo=photo))
+    assert session.sent() == []
+
+    await dp.feed_update(bot, business_message("Как вам?"))
+
+    assert writer.histories[-1] == [(THEM, "[фото]"), (THEM, "Как вам?")]
+
+
+async def test_owners_sticker_enters_history_as_owners_label(
+    bot: Bot, writer: FakeWriter, sessionmaker: Any
+) -> None:
+    dp = build_dispatcher(sessionmaker, writer)
+    sticker = Sticker(
+        file_id="s",
+        file_unique_id="s",
+        type="regular",
+        width=10,
+        height=10,
+        is_animated=False,
+        is_video=False,
+    )
+    await dp.feed_update(bot, business_message(sticker=sticker, sender=OWNER))
+
+    await dp.feed_update(bot, business_message("Ахаха"))
+
+    assert writer.histories[-1] == [(ME, "[стикер]"), (THEM, "Ахаха")]
+
+
+@pytest.mark.parametrize(
+    ("attachment", "label"),
+    [
+        (
+            {"video_note": VideoNote(file_id="n", file_unique_id="n", length=1, duration=1)},
+            "[видеосообщение]",
+        ),
+        (
+            {"video": Video(file_id="v", file_unique_id="v", width=1, height=1, duration=1)},
+            "[видео]",
+        ),
+        (
+            {
+                "video": Video(file_id="v", file_unique_id="v", width=1, height=1, duration=1),
+                "caption": "Смонтировал",
+            },
+            "[видео] Смонтировал",
+        ),
+        ({"location": Location(latitude=55.75, longitude=37.62)}, "[вложение]"),
+    ],
+)
+async def test_other_attachments_enter_history_as_labels_without_draft(
+    bot: Bot,
+    session: FakeSession,
+    writer: FakeWriter,
+    sessionmaker: Any,
+    attachment: dict[str, Any],
+    label: str,
+) -> None:
+    dp = build_dispatcher(sessionmaker, writer)
+    await dp.feed_update(bot, business_message(**attachment))
+    assert session.sent() == []
+
+    await dp.feed_update(bot, business_message("Ну как?"))
+
+    assert writer.histories[-1] == [(THEM, label), (THEM, "Ну как?")]

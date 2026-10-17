@@ -4,3 +4,7 @@ __pycache__/
 .mypy_cache/
 .pytest_cache/
 .ruff_cache/
+
+# Сгенерированные схемы и графы
+.archify/
+graphify-out/
